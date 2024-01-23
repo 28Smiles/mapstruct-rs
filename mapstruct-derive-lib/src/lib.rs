@@ -176,7 +176,7 @@ impl Parse for MapStruct {
 }
 
 impl MapStruct {
-    fn transform(self, input: DeriveInput) -> DeriveInput {
+    fn transform(self, input: DeriveInput) -> syn::Result<DeriveInput> {
         let mut input = input;
         input.attrs = self.attrs;
         input.vis = self.vis;
@@ -213,8 +213,8 @@ impl MapStruct {
             Data::Struct(data) => {
                 let fields_named = match &mut data.fields {
                     syn::Fields::Named(fields_named) => fields_named,
-                    syn::Fields::Unnamed(_) => panic!("unnamed fields not supported"),
-                    syn::Fields::Unit => panic!("unit fields not supported"),
+                    syn::Fields::Unnamed(_) => return Err(syn::Error::new_spanned(input, "tuple fields not supported"))?,
+                    syn::Fields::Unit => return Err(syn::Error::new_spanned(input, "unit fields not supported"))?,
                 };
                 let mut added_fields = Vec::new();
                 let mut removed_fields = Vec::new();
@@ -247,6 +247,40 @@ impl MapStruct {
                         },
                     }
                 }
+
+                for field_name in removed_fields.iter() {
+                    if fields_named.named.iter().find(|field| field.ident.as_ref().unwrap() == field_name).is_none() {
+                        return Err(syn::Error::new_spanned(
+                            field_name,
+                            "field cannot be removed because it is not present in the original struct",
+                        ))?;
+                    }
+                }
+                for (from, _, _) in renamed_fields.iter() {
+                    if fields_named.named.iter().find(|field| field.ident.as_ref().unwrap() == from).is_none() {
+                        return Err(syn::Error::new_spanned(
+                            from,
+                            "field cannot be renamed because it is not present in the original struct",
+                        ))?;
+                    }
+                }
+                for (name, _) in retype_fields.iter() {
+                    if fields_named.named.iter().find(|field| field.ident.as_ref().unwrap() == name).is_none() {
+                        return Err(syn::Error::new_spanned(
+                            name,
+                            "field cannot be retyped because it is not present in the original struct",
+                        ))?;
+                    }
+                }
+                for (from, _, _, _) in rename_and_retype_fields.iter() {
+                    if fields_named.named.iter().find(|field| field.ident.as_ref().unwrap() == from).is_none() {
+                        return Err(syn::Error::new_spanned(
+                            from,
+                            "field cannot be renamed and retyped because it is not present in the original struct",
+                        ))?;
+                    }
+                }
+
                 let mut fields = fields_named.named.iter()
                     .cloned()
                     .filter(|field| {
@@ -278,31 +312,42 @@ impl MapStruct {
 
                 fields_named.named = Punctuated::from_iter(fields.into_iter());
             }
-            Data::Enum(_) => panic!("enum not supported"),
-            Data::Union(_) => panic!("union not supported"),
+            Data::Enum(_) => return Err(syn::Error::new_spanned(input, "enum not supported"))?,
+            Data::Union(_) => return Err(syn::Error::new_spanned(input, "union not supported"))?,
         }
 
-        input
+        Ok(input)
     }
 }
 
 pub fn derive(input: TokenStream) -> TokenStream {
-    let input = parse2::<DeriveInput>(input)
-        .expect("failed to parse input");
-    input.attrs
+    let input = match parse2::<DeriveInput>(input) {
+        Ok(input) => input,
+        Err(err) => return err.to_compile_error(),
+    };
+    match input.attrs
         .iter()
         .filter(|attr| attr.path().is_ident("mapstruct"))
         .map(|attr| &attr.meta)
         .map(|meta| match meta {
-            syn::Meta::List(list) => list.tokens.clone(),
-            _ => panic!("expected list"),
+            syn::Meta::List(list) => Ok(list.tokens.clone()),
+            _ => Err(syn::Error::new_spanned(meta, "expected #[mapstruct(...)]"))
         })
-        .map(|tokens| parse2::<MapStruct>(tokens).expect("failed to parse input"))
-        .map(|mapstruct| mapstruct.transform(input.clone()))
-        .map(|input| quote! {
-            #input
-        })
-        .collect()
+        .collect::<Result<Vec<_>, _>>() {
+        Ok(tokens) => match tokens.into_iter()
+            .map(|tokens| parse2::<MapStruct>(tokens))
+            .collect::<Result<Vec<_>, _>>() {
+            Ok(mapstructs) => mapstructs.into_iter()
+                .map(|mapstruct| mapstruct.transform(input.clone()))
+                .map(|result| match result {
+                    Ok(input) => quote! { #input },
+                    Err(err) => err.to_compile_error(),
+                })
+                .collect(),
+            Err(err) => err.to_compile_error(),
+        },
+        Err(err) => return err.to_compile_error(),
+    }
 }
 
 #[cfg(test)]
