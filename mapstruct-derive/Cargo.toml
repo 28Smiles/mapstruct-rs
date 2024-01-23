@@ -1,0 +1,10 @@
+[package]
+name = "mapstruct-derive"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+mapstruct-derive-lib = { path = "../mapstruct-derive-lib" }
