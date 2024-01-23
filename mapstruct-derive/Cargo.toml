@@ -2,9 +2,11 @@
 name = "mapstruct-derive"
 version = "0.1.0"
 edition = "2021"
+authors = ["Leon Camus"]
+license = "MIT"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-mapstruct-derive-lib = { path = "../mapstruct-derive-lib" }
+mapstruct-derive-lib = { path = "../mapstruct-derive-lib", version = "0.1.0" }
