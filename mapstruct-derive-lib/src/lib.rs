@@ -182,14 +182,8 @@ impl MapStruct {
         input.vis = self.vis;
         input.ident = self.ident;
         let generic_removes = self.generics.iter()
-            .filter(|change| match change {
-                GenericChange::Add(_) => false,
-                GenericChange::Remove(_) => true,
-            })
-            .map(|change| match change {
-                GenericChange::Add(_) => unreachable!(),
-                GenericChange::Remove(ident) => ident,
-            })
+            .filter(|change| matches!(change, GenericChange::Remove(_)))
+            .map(|change| unwrap_one_variant!(change, GenericChange::Remove(lifetime), lifetime))
             .collect::<Vec<_>>();
         input.generics.params = input.generics.params.into_iter()
             .filter(|param| match param {
