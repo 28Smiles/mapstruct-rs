@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Leon Camus"]
 license = "MIT"
+description = "A derive macro for mapstruct"
 
 [dependencies]
 proc-macro2 = "1"

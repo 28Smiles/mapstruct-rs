@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Leon Camus"]
 license = "MIT"
+description = "Create refactor safe derivatives of Structs with proc-macros."
 
 [dependencies]
 mapstruct-derive = { path = "mapstruct-derive", version = "0.1.0" }
