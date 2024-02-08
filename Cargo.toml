@@ -1,10 +1,10 @@
 [package]
 name = "mapstruct"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Leon Camus"]
 license = "MIT"
 description = "Create refactor safe derivatives of Structs with proc-macros."
 
 [dependencies]
-mapstruct-derive = { path = "mapstruct-derive", version = "0.2.0" }
+mapstruct-derive = { path = "mapstruct-derive", version = "0.3.0" }
