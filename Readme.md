@@ -6,7 +6,7 @@ The syntax is similar to the struct definition syntax, but you only specify the 
 You use the `+` operator to add a field or generic, the `-` operator to remove a field or generic and the `~` operator
 to change the type or name of a field or generic.
 
-## Example
+## Example Struct
 
 ```rust
 use mapstruct_rs::Mapstruct;
@@ -42,5 +42,39 @@ struct Y<'a> {
     age: i32,
     some: &'a str,
     last_name: &'a str,
+}
+```
+
+## Example Enum
+
+```rust
+use mapstruct_rs::Mapstruct;
+
+#[derive(MapStruct)]
+#[mapstruct(
+    #[derive(Debug)]
+    enum Y {
+        ~A {
+            +id: i64,
+        },
+        +D(i8),
+    }
+)]
+enum X {
+    A(i64),
+    B(i32),
+    C(i16),
+}
+```
+The above code will generate the following enum:
+```rust
+#[derive(Debug)]
+enum Y {
+    A {
+        id: i64,
+    },
+    B(i32),
+    C(i16),
+    D(i8)
 }
 ```
