@@ -41,8 +41,10 @@ impl Transformer for EnumChange {
             .collect::<Vec<_>>();
 
         for variant_change in &self.changes {
+            let mut applied = false;
             for variant in variant_change.create()? {
                 new_variants.push((variant, VariantChange::Added));
+                applied = true;
             }
 
             for (variant, change) in &mut new_variants {
@@ -71,11 +73,19 @@ impl Transformer for EnumChange {
                         ));
                     } else {
                         *change = VariantChange::Changed;
-                        continue;
+                        applied = true;
                     }
                 } else if do_remove {
                     *change = VariantChange::Removed;
+                    applied = true;
                 }
+            }
+
+            if !applied {
+                return Err(syn::Error::new(
+                    variant_change.span(),
+                    "No variant matched the given change"
+                ));
             }
         }
 

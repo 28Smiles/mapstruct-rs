@@ -1,58 +1,28 @@
-use syn::FieldMutability;
+use syn::Fields;
 use syn::parse::{Parse, ParseStream};
+use syn::spanned::Spanned;
 
 use crate::struct_change::StructChange;
 use crate::transformer::Transformer;
+use crate::tuple_change::TupleChange;
 
-pub struct TupleChange {
-    types: Vec<syn::Type>,
-}
-
-impl Parse for TupleChange {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        syn::parenthesized!(content in input);
-        let types = content.parse_terminated(syn::Type::parse, syn::Token![,])?;
-        let types = types.into_iter().collect();
-        Ok(TupleChange { types })
-    }
-}
-
-impl Transformer for TupleChange {
-    type Item = syn::FieldsUnnamed;
-    type CreateIter = std::option::IntoIter<Self::Item>;
-
-    fn create(&self) -> syn::Result<Self::CreateIter> {
-        Ok(None.into_iter())
-    }
-
-    fn transform(&self, item: &mut Self::Item) -> syn::Result<bool> {
-        item.unnamed.clear();
-        item.unnamed.extend(self.types.iter().cloned().map(|ty| syn::Field {
-            attrs: Vec::new(),
-            vis: syn::Visibility::Inherited,
-            mutability: FieldMutability::None,
-            ident: None,
-            colon_token: None,
-            ty,
-        }));
-
-        Ok(true)
-    }
-
-    fn remove(&self, _: &Self::Item) -> syn::Result<bool> {
-        Ok(true)
-    }
-}
-
+/// A change instruction for a variant.
 pub enum VariantChange {
+    /// Add a new variant to the enum, indicated by a `+` prefix
     Add(syn::Variant),
+    /// Remove a variant from the enum, indicated by a `-` prefix
     Remove(syn::Ident),
+    /// Rename a variant, indicated by a `~` prefix
     Rename(syn::Ident, syn::Ident),
-    TupleRetype(syn::Ident, TupleChange),
-    StructRetype(syn::Ident, StructChange),
-    StructReplace(syn::Ident, syn::Ident, StructChange),
-    TupleReplace(syn::Ident, syn::Ident, TupleChange),
+    /// Retype a tuple variant, indicated by a `~` prefix
+    /// If followed by `->`, the identifier is renamed too.
+    TupleRetype(syn::Ident, Option<syn::Ident>, TupleChange),
+    /// Retype a struct variant, indicated by a `~` prefix
+    /// If followed by `->`, the identifier is renamed too.
+    StructRetype(syn::Ident, Option<syn::Ident>, StructChange),
+    /// Replace a struct variant, either by providing a variant
+    /// with the same name or a new name after `->`.
+    Replace(Option<syn::Ident>, syn::Variant),
 }
 
 impl Parse for VariantChange {
@@ -62,45 +32,44 @@ impl Parse for VariantChange {
             let variant = input.parse()?;
             return Ok(VariantChange::Add(variant));
         }
+
         if input.peek(syn::Token![-]) {
             input.parse::<syn::Token![-]>()?;
             let ident = input.parse()?;
             return Ok(VariantChange::Remove(ident));
         }
+
         if input.peek(syn::Token![~]) {
             input.parse::<syn::Token![~]>()?;
             let from = input.parse()?;
-            // Try to parse a rename
-            let to = if let Ok(_) = input.parse::<syn::Token![->]>() {
+            let to = if input.peek(syn::Token![->]) {
+                input.parse::<syn::Token![->]>()?;
                 Some(input.parse()?)
             } else {
                 None
             };
-            // Try to parse a tuple retype
             if let Ok(types) = input.parse::<TupleChange>() {
-                if let Some(to) = to {
-                    return Ok(VariantChange::TupleReplace(from, to, types));
-                } else {
-                    return Ok(VariantChange::TupleRetype(from, types));
-                }
+                return Ok(VariantChange::TupleRetype(from, to, types));
             }
-            // Try to parse a struct retype
             if let Ok(fields) = input.parse::<StructChange>() {
-                if let Some(to) = to {
-                    return Ok(VariantChange::StructReplace(from, to, fields));
-                } else {
-                    return Ok(VariantChange::StructRetype(from, fields));
-                }
+                return Ok(VariantChange::StructRetype(from, to, fields));
             }
-
             if let Some(to) = to {
                 return Ok(VariantChange::Rename(from, to));
             }
 
-            return Ok(VariantChange::Rename(from.clone(), from));
+            return Err(input.error("expected `->` or a change instruction"))
         }
 
-        Err(input.error("expected one of +, -, ~"))
+        // Try to parse a replacement
+        if input.peek(syn::Ident) && input.peek2(syn::Token![->]) {
+            let from = input.parse()?;
+            input.parse::<syn::Token![->]>()?;
+            let variant = input.parse()?;
+            return Ok(VariantChange::Replace(Some(from), variant));
+        }
+
+        return Ok(VariantChange::Replace(None, input.parse()?));
     }
 }
 
@@ -122,59 +91,59 @@ impl Transformer for VariantChange {
 
                 Ok(true)
             }
-            VariantChange::TupleRetype(ident, change) if &variant.ident == ident => {
-                let mut fields = syn::FieldsUnnamed {
-                    paren_token: syn::token::Paren::default(),
-                    unnamed: Default::default(),
-                };
-                change.transform(&mut fields)?;
-                variant.fields = syn::Fields::Unnamed(fields);
-
-                Ok(true)
-            }
-            VariantChange::StructRetype(ident, change) if &variant.ident == ident => {
+            VariantChange::TupleRetype(from, to, change) if &variant.ident == from => {
                 match &mut variant.fields {
-                    syn::Fields::Named(fields) => {
-                        change.transform(fields)?;
+                    Fields::Named(_) => {
+                        Err(syn::Error::new_spanned(
+                            variant,
+                            "cannot retype a struct variant as a tuple variant",
+                        ))
                     }
-                    _ => {
-                        let mut fields = syn::FieldsNamed {
-                            brace_token: syn::token::Brace::default(),
-                            named: Default::default(),
-                        };
-                        change.transform(&mut fields)?;
-                        variant.fields = syn::Fields::Named(fields);
+                    Fields::Unnamed(fields) => {
+                        if let Some(to) = to {
+                            variant.ident = to.clone();
+                        }
+
+                        change.transform(fields)
+                    }
+                    Fields::Unit => {
+                        Err(syn::Error::new_spanned(
+                            variant,
+                            "cannot retype a unit variant as a tuple variant, maybe you want to replace it instead",
+                        ))
                     }
                 }
-
-                Ok(true)
             }
-            VariantChange::StructReplace(from, to, change) if &variant.ident == from => {
-                variant.ident = to.clone();
+            VariantChange::StructRetype(from, to, change) if &variant.ident == from => {
                 match &mut variant.fields {
                     syn::Fields::Named(fields) => {
-                        change.transform(fields)?;
+                        if let Some(to) = to {
+                            variant.ident = to.clone();
+                        }
+
+                        change.transform(fields)
                     }
-                    _ => {
-                        let mut fields = syn::FieldsNamed {
-                            brace_token: syn::token::Brace::default(),
-                            named: Default::default(),
-                        };
-                        change.transform(&mut fields)?;
-                        variant.fields = syn::Fields::Named(fields);
+                    syn::Fields::Unnamed(_) => {
+                        Err(syn::Error::new_spanned(
+                            variant,
+                            "cannot retype a tuple variant as a struct variant",
+                        ))
+                    }
+                    syn::Fields::Unit => {
+                        Err(syn::Error::new_spanned(
+                            variant,
+                            "cannot retype a unit variant as a struct variant, maybe you want to replace it instead",
+                        ))
                     }
                 }
+            }
+            VariantChange::Replace(Some(from), to) if &variant.ident == from => {
+                *variant = to.clone();
 
                 Ok(true)
             }
-            VariantChange::TupleReplace(from, to, change) if &variant.ident == from => {
-                variant.ident = to.clone();
-                let mut fields = syn::FieldsUnnamed {
-                    paren_token: syn::token::Paren::default(),
-                    unnamed: Default::default(),
-                };
-                change.transform(&mut fields)?;
-                variant.fields = syn::Fields::Unnamed(fields);
+            VariantChange::Replace(None, to) if &variant.ident == &to.ident => {
+                *variant = to.clone();
 
                 Ok(true)
             }
@@ -186,6 +155,20 @@ impl Transformer for VariantChange {
         match self {
             VariantChange::Remove(ident) => Ok(&variant.ident == ident),
             _ => Ok(false),
+        }
+    }
+}
+
+impl VariantChange {
+    pub fn span(&self) -> proc_macro2::Span {
+        match self {
+            VariantChange::Add(variant) => variant.span(),
+            VariantChange::Remove(ident) => ident.span(),
+            VariantChange::Rename(from, _) => from.span(),
+            VariantChange::TupleRetype(from, _, _) => from.span(),
+            VariantChange::StructRetype(from, _, _) => from.span(),
+            VariantChange::Replace(Some(from), _) => from.span(),
+            VariantChange::Replace(None, variant) => variant.span(),
         }
     }
 }

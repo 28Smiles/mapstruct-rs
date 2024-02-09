@@ -2,18 +2,18 @@ use std::vec::IntoIter;
 
 use syn::parse::{Parse, ParseStream};
 
-use crate::field::FieldChange;
+use crate::named_field_change::NamedFieldChange;
 use crate::transformer::Transformer;
 
 pub struct StructChange {
-    changes: Vec<FieldChange>,
+    changes: Vec<NamedFieldChange>,
 }
 
 impl Parse for StructChange {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let content;
         syn::braced!(content in input);
-        let changes = content.parse_terminated(FieldChange::parse, syn::Token![,])?;
+        let changes = content.parse_terminated(NamedFieldChange::parse, syn::Token![,])?;
         let changes = changes.into_iter().collect();
         Ok(StructChange { changes })
     }
@@ -42,8 +42,10 @@ impl Transformer for StructChange {
             .collect::<Vec<_>>();
 
         for field_change in &self.changes {
+            let mut applied = false;
             for variant in field_change.create()? {
                 new_fields.push((variant, FieldChange::Added));
+                applied = true;
             }
 
             for (field, change) in &mut new_fields {
@@ -72,11 +74,19 @@ impl Transformer for StructChange {
                         ));
                     } else {
                         *change = FieldChange::Changed;
-                        continue;
+                        applied = true;
                     }
                 } else if do_remove {
                     *change = FieldChange::Removed;
+                    applied = true;
                 }
+            }
+
+            if !applied {
+                return Err(syn::Error::new(
+                    field_change.span(),
+                    "No changes applied"
+                ));
             }
         }
 

@@ -7,12 +7,14 @@ use crate::r#struct::MapStruct;
 
 mod r#struct;
 mod r#enum;
-mod field;
+mod named_field_change;
 mod generic;
 mod variant;
 mod transformer;
 mod struct_change;
 mod enum_change;
+mod tuple_change;
+mod unnamed_field_change;
 
 #[macro_export]
 macro_rules! unwrap_one_variant {
@@ -243,9 +245,9 @@ mod tests {
             #[mapstruct(
                 #[derive(Debug)]
                 pub enum Y {
-                    ~A(i64),
-                    ~B(i32),
-                    ~C(i16),
+                    A(i64),
+                    B(i32),
+                    C(i16),
                     +D(i8),
                 }
             )]
@@ -271,6 +273,38 @@ mod tests {
                 B(i32),
                 C(i16),
                 D(i8)
+            }
+        };
+        assert_eq!(expected.to_string(), derive(input).to_string());
+    }
+
+    #[test]
+    fn test_derive_enum_tuple_change() {
+        let input = quote! {
+            #[mapstruct(
+                #[derive(Debug)]
+                pub enum Y {
+                    ~A(_, _, _, +i64),
+                    ~B(_, _, ~i128),
+                    ~C(_, _, ~u16, +u8),
+                    +E(i8, i16, i32, i64),
+                }
+            )]
+            enum X {
+                A(i8, i16, i32),
+                B(i32, i64, i16),
+                C(i16, i8, i32),
+                D(i8, i16, i32, i64),
+            }
+        };
+        let expected = quote! {
+            #[derive(Debug)]
+            pub enum Y {
+                A(i8, i16, i32, i64),
+                B(i32, i64, i128),
+                C(i16, i8, u16, u8),
+                D(i8, i16, i32, i64),
+                E(i8, i16, i32, i64)
             }
         };
         assert_eq!(expected.to_string(), derive(input).to_string());

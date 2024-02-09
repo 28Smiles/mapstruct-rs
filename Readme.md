@@ -54,15 +54,16 @@ use mapstruct_rs::Mapstruct;
 #[mapstruct(
     #[derive(Debug)]
     enum Y {
-        ~A {
-            +id: i64,
+        A {
+            id: i64,
         },
+        ~B(~i32, _),
         +D(i8),
     }
 )]
 enum X {
     A(i64),
-    B(i32),
+    B(i32, i8),
     C(i16),
 }
 ```
